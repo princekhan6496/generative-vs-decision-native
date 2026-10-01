@@ -1,0 +1,5 @@
+{
+  "description": "Approximate parameter-matched setting; exact count depends on shared vocabulary size.",
+  "mini_llm": {"d_model": 96, "n_heads": 4, "n_layers": 1, "d_ff": 192},
+  "mini_jev": {"d_model": 72, "n_heads": 4, "n_layers": 1, "d_ff": 144}
+}

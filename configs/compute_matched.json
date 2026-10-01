@@ -1,0 +1,6 @@
+{
+  "description": "Compute-matched protocol: equalize optimizer steps, examples seen, sequence length, and report measured wall-clock time.",
+  "mini_llm": {"d_model": 96, "n_heads": 4, "n_layers": 2, "d_ff": 192},
+  "mini_jev": {"d_model": 96, "n_heads": 4, "n_layers": 2, "d_ff": 192},
+  "protocol": {"examples_seen": "equal", "optimizer_steps": "equal", "max_state_tokens": 128, "seeds": [42,43,44]}
+}
