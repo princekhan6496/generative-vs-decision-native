@@ -333,8 +333,6 @@ This is the central architectural distinction being investigated.
 
 The absolute BANKING77 intent accuracy is low for both educational models.
 
-This should be acknowledged rather than hidden.
-
 The project is **not a state-of-the-art BANKING77 classifier**.
 
 The experiment uses small models and is designed primarily to study architectural trade-offs under a controlled parameter budget.
