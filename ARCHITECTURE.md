@@ -1,12 +1,44 @@
 # Architecture
 
-This document describes the architectures implemented in this repository.
+## 1. Architectural Research Motivation
 
-> **Important:** The Mini-Jev architecture below is an original educational implementation inspired by publicly documented TypeSafe/System One behavior. It is **not** TypeSafe Jev's disclosed internal architecture.
+The central architectural question is:
 
-## 1. Mini-LLM
+> **What changes when a decision is represented as generated text versus an explicit typed probability distribution?**
 
-High-level flow:
+The project therefore implements two deliberately different architectures.
+
+### Mini-LLM
+
+```text
+state + decision prompt
+        ↓
+decoder-only Transformer
+        ↓
+text / token probabilities
+        ↓
+decision
+```
+
+### Mini-Jev
+
+```text
+state + typed question
+        ↓
+shared state representation
+        ↓
+typed decision head
+        ↓
+probability distribution
+```
+
+The Mini-Jev design is an educational architecture inspired by publicly documented TypeSafe/System One behavior. It is not TypeSafe Jev's disclosed internal architecture.
+
+---
+
+# 2. Mini-LLM Architecture
+
+## 2.1 High-level pipeline
 
 ```text
 tokens
@@ -22,29 +54,37 @@ final RMSNorm
 vocabulary logits
 ```
 
-The Mini-LLM is a decoder-only Transformer.
+The model is a decoder-only Transformer.
 
-### Decoder block
+Its primary objective is next-token prediction.
+
+---
+
+# 3. Mini-LLM Decoder Block
 
 Each decoder block follows:
 
 ```text
-RMSNorm
-  ↓
-causal multi-head self-attention
-  ↓
-residual connection
-  ↓
-RMSNorm
-  ↓
-SwiGLU feed-forward network
-  ↓
-residual connection
+Input
+  │
+  ├── RMSNorm
+  │
+  ├── Causal Multi-Head Self-Attention
+  │
+  └── Residual Add
+       │
+       ├── RMSNorm
+       │
+       ├── SwiGLU
+       │
+       └── Residual Add
+              ↓
+            Output
 ```
 
-### Causal attention
+## 3.1 Attention
 
-For a sequence of hidden states, learned projections produce:
+For hidden states `X`:
 
 ```text
 Q = XW_Q
@@ -52,68 +92,84 @@ K = XW_K
 V = XW_V
 ```
 
-The scaled attention operation is:
+Scaled causal attention is:
 
 ```text
-Attention(Q, K, V)
-  = softmax(QKᵀ / √d_head + causal_mask)V
+Attention(Q,K,V)
+= softmax(QKᵀ / √d_head + causal_mask)V
 ```
 
-The causal mask prevents a position from attending to future tokens.
+The causal mask prevents a token from using future tokens.
 
-### RoPE
+## 3.2 RoPE
 
-Rotary positional embeddings rotate pairs of query/key coordinates by a position-dependent angle.
+RoPE rotates query/key coordinate pairs according to token position and frequency.
 
-For an adjacent coordinate pair:
+For an adjacent pair:
 
 ```text
 (x_2i, x_2i+1)
 ```
 
-the pair is rotated using sine/cosine values determined by position and frequency.
+the coordinates are rotated using position-dependent sine/cosine values.
 
-RoPE is an implementation choice of this Mini-LLM. It is not evidence that TypeSafe Jev uses RoPE.
+RoPE is an implementation choice of Mini-LLM.
 
-### SwiGLU
+It is **not evidence that TypeSafe Jev uses RoPE**.
 
-The feed-forward block uses a SwiGLU-style gated transformation.
+## 3.3 RMSNorm
 
-The exact dimensions and configuration are repository implementation parameters.
+RMSNorm normalizes hidden representations before the attention and feed-forward transformations according to the repository's implementation.
 
-### Language-model objective
+## 3.4 SwiGLU
 
-For a target token sequence, the model predicts the next token at each position.
+The feed-forward component uses a gated SwiGLU-style transformation.
 
-The training objective is categorical cross-entropy over vocabulary tokens.
+Its dimensions are implementation parameters.
 
-Optimization uses AdamW with gradient clipping.
+---
 
-### Generation
+# 4. Mini-LLM Training
 
-The Mini-LLM supports autoregressive generation.
+The Mini-LLM predicts the next token at each position.
 
-At each step:
+The loss is categorical cross-entropy:
 
 ```text
-previous tokens
-      ↓
-Transformer
-      ↓
-next-token logits
-      ↓
-temperature / top-k / top-p sampling
-      ↓
-sampled token
-      ↓
-append token and repeat
+L = -log p(y)
 ```
 
-Because generation is autoregressive, later tokens depend on earlier generated tokens.
+Optimization uses:
 
-## 2. Mini-Jev
+- AdamW
+- gradient clipping
+- checkpoints
 
-High-level flow:
+The model can generate autoregressively:
+
+```text
+context
+  ↓
+Transformer
+  ↓
+next-token logits
+  ↓
+temperature / top-k / top-p
+  ↓
+sample token
+  ↓
+append token
+  ↓
+repeat
+```
+
+This makes the architecture flexible for language generation, but structured decisions must be represented through text.
+
+---
+
+# 5. Mini-Jev Architecture
+
+## 5.1 High-level pipeline
 
 ```text
 state
@@ -124,22 +180,24 @@ Transformer encoder
   ↓
 pooled shared state representation
   ↓
-shared representation reused for each question
+shared representation reused across questions
 ```
 
-For each question:
+For each typed question:
 
 ```text
-question instruction + learned type representation
-                    ↓
-              question encoder
-                    ↓
-        state representation + question representation
-                    ↓
-                 typed head
+question instruction
+        +
+question/type representation
+        ↓
+question representation
+        ↓
+shared state + question representation
+        ↓
+typed head
 ```
 
-The three implemented typed heads are:
+The three heads are:
 
 ```text
 Choice
@@ -147,180 +205,311 @@ Score
 Noul
 ```
 
-### Choice
+---
 
-Choice represents a selection from a predefined set of options.
+# 6. Choice Head
 
-The implementation computes a score for each candidate option and applies softmax:
+Choice represents a decision among predefined options.
+
+Conceptually:
+
+```text
+shared state
+     +
+question
+     ↓
+option scores
+     ↓
+softmax
+     ↓
+P(option 1), ..., P(option n)
+```
+
+The probability distribution is:
 
 ```text
 p_i = exp(z_i) / Σ_j exp(z_j)
 ```
 
-The resulting vector is a probability distribution over the allowed options.
+The output is directly tied to the allowed decision space.
 
-The application, rather than the model, owns any downstream thresholding or action logic.
+The application owns any downstream thresholds and actions.
 
-### Score
+---
 
-Score represents an ordered rating over predefined levels.
+# 7. Score Head
 
-The implementation produces a probability distribution over the ordered levels and computes an expected score:
+Score represents an ordered decision.
+
+The model produces probabilities over predefined levels:
+
+```text
+low
+medium
+high
+```
+
+The expected score is:
 
 ```text
 E[s] = Σ_i p_i s_i
 ```
 
-The level set and numerical mapping are benchmark/model design choices in this repository.
+The levels and numerical mapping are benchmark/model choices in this repository.
 
-They must not be presented as TypeSafe's internal scoring implementation.
+They are not claims about TypeSafe's internal Score implementation.
 
-### Noul
+---
 
-Noul represents a binary yes/no decision.
+# 8. Noul Head
 
-The implementation produces a binary logit and converts it to a probability with a sigmoid:
+Noul is implemented as a binary decision:
+
+```text
+yes / no
+```
+
+The model produces a binary logit and probability:
 
 ```text
 p = sigmoid(z)
 ```
 
-### Multi-question inference
+This gives the model a direct representation for binary automation decisions.
 
-A central feature of the Mini-Jev design is shared-state computation.
+---
 
-Instead of independently encoding the same state for every question, the model computes the shared state representation once:
+# 9. Shared-State Multi-Question Inference
+
+The main architectural difference being tested is the reuse of a state representation.
+
+Instead of processing the same state independently for every question:
 
 ```text
-                         ┌─ question 1 → Choice
-                         │
-state → shared encoder ──┼─ question 2 → Noul
-                         │
-                         ├─ question 3 → Score
-                         │
-                         └─ question 4 → Choice
+state → encoder → question 1
+state → encoder → question 2
+state → encoder → question 3
+state → encoder → question 4
 ```
 
-This is the implementation's basis for testing multi-question inference.
+Mini-Jev computes:
 
-The measured latency benefit is empirical. It is not guaranteed and depends on implementation, hardware and workload.
+```text
+state
+  ↓
+shared encoder
+  ↓
+shared representation
+  ├── question 1 → typed head
+  ├── question 2 → typed head
+  ├── question 3 → typed head
+  └── question 4 → typed head
+```
 
-## 3. Calibration
+This is the basis of the multi-question latency experiment.
 
-For probability calibration, the benchmark uses validation-only temperature scaling:
+A speedup is not assumed.
+
+It must be measured because actual performance depends on hardware, batch size, sequence length and implementation overhead.
+
+---
+
+# 10. Decision Probability Comparison
+
+The architectures produce probabilities differently.
+
+## Mini-Jev
+
+Probability is native to the typed head:
+
+```text
+state + question
+       ↓
+typed head
+       ↓
+probability distribution
+```
+
+## Mini-LLM
+
+Probability is estimated from candidate answer likelihoods:
+
+```text
+decision prompt
+       ↓
+candidate option A → log likelihood
+candidate option B → log likelihood
+...
+       ↓
+normalize candidate likelihoods
+       ↓
+probability distribution
+```
+
+This gives both models a comparable probability representation for Brier and NLL.
+
+However:
+
+> **The Mini-LLM does not become a native decision model through this evaluation procedure.**
+
+---
+
+# 11. Calibration
+
+The benchmark uses validation-only temperature scaling:
 
 ```text
 p = softmax(z / T)
 ```
 
-where `T` is fitted using validation outputs.
+`T` is fitted on validation outputs.
 
-The fitted `T` is then frozen before test evaluation.
+It is then frozen and applied to the test set.
 
-This is a standard calibration baseline in this repository.
+This is a calibration baseline.
 
-It is **not** TypeSafe's RLCD method.
+It is **not TypeSafe RLCD**.
 
-## 4. Mini-LLM decision evaluation
+---
 
-The Mini-LLM is fundamentally a text-generating model.
+# 12. Architectural Comparison
 
-To compare its probabilities with the Mini-Jev decision heads, the benchmark:
+| Property | Mini-LLM | Mini-Jev |
+|---|---|---|
+| Primary output | Tokens/text | Typed decision |
+| Core architecture | Decoder Transformer | Encoder + typed heads |
+| Native categorical decision head | No | Yes |
+| Open-ended generation | Yes | Not the goal |
+| Choice output | Text / likelihood evaluation | Direct probability distribution |
+| Score output | Text / likelihood evaluation | Direct probability distribution |
+| Noul output | Text / likelihood evaluation | Direct binary probability |
+| Shared state across questions | Not the primary design | Yes |
+| Structured output | Generated | Native |
+| Calibration baseline | Temperature scaling | Temperature scaling |
 
-1. Builds a structured decision prompt.
-2. Lists the allowed candidate options.
-3. Computes conditional log-likelihoods for candidate answers.
-4. Normalizes the candidate scores into a probability distribution.
+This table describes the repository implementations only.
 
-This produces a probability vector suitable for metrics such as Brier score and NLL.
+---
 
-It does not turn the Mini-LLM into a native Choice/Score/Noul model.
+# 13. Why Compare These Architectures?
 
-Generated structured output is evaluated separately for parse/mapping failures.
+The comparison is not simply:
 
-## 5. Shared equations
+> “Which model gets the higher accuracy?”
 
-### Softmax
+It investigates whether the output representation itself changes measurable properties.
 
-```text
-p_i = exp(z_i) / Σ_j exp(z_j)
-```
-
-### Binary probability
-
-```text
-p = sigmoid(z)
-```
-
-### Score expectation
+The research dimensions are:
 
 ```text
-E[s] = Σ_i p_i s_i
+decision quality
+      +
+probability quality
+      +
+seed stability
+      +
+structured-output reliability
+      +
+training cost
+      +
+multi-question inference
 ```
 
-### Temperature scaling
+This makes the project an architecture study rather than only a classification exercise.
 
-```text
-p = softmax(z / T)
-```
+---
 
-### Cross-entropy
+# 14. Architectural Interpretation of the Results
 
-For a target class `y`:
+The completed parameter-matched experiments showed:
 
-```text
-L = -log p_y
-```
+### Mini-LLM
 
-Choice/Score heads use categorical cross-entropy.
+- slightly higher mean intent accuracy;
+- higher mean macro F1;
+- slightly better mean Brier score;
+- substantially lower measured training time;
+- considerably larger seed-to-seed variation.
 
-Noul uses binary cross-entropy with logits.
+### Mini-Jev
 
-The Mini-LLM uses next-token cross-entropy.
+- slightly lower mean intent accuracy;
+- lower mean macro F1;
+- better mean NLL;
+- much smaller seed-to-seed variation;
+- substantially higher measured training time in this implementation;
+- explicit typed probability outputs.
 
-## 6. Architecture boundary: public TypeSafe information vs this repository
+Therefore, the architecture comparison suggests:
 
-### Publicly documented TypeSafe concepts
+> **Generative and decision-native representations produce different trade-offs even when parameter counts are nearly identical.**
 
-TypeSafe publicly describes System One models as:
+---
 
-- decision-oriented models for software/automation;
-- models that return typed decisions;
-- models whose decisions include probabilities/confidence;
-- systems supporting Noul, Choice and Score decision primitives;
-- systems designed to evaluate multiple questions against shared state;
-- a model family using a new architecture, parallel sampler and RLCD training method.
+# 15. Public TypeSafe Boundary
 
-### Repository implementation choices
+Publicly documented TypeSafe/System One concepts include:
 
-This repository chooses:
+- decision-oriented models;
+- typed decisions;
+- probability/confidence outputs;
+- Noul;
+- Choice;
+- Score;
+- multiple questions over shared state;
+- a new architecture;
+- a parallel sampler;
+- RLCD.
 
-- a decoder-only Transformer for Mini-LLM;
-- a Transformer encoder for Mini-Jev;
-- RoPE in Mini-LLM;
+The internal details of Jev are not sufficiently disclosed to establish that it uses:
+
+- this Transformer encoder;
+- this number of layers;
+- this hidden size;
+- this attention implementation;
+- RoPE;
 - RMSNorm;
 - SwiGLU;
-- a separate question representation;
-- shared state encoding;
-- Choice/Score/Noul heads;
-- supervised mixed-task training;
-- temperature scaling;
-- BANKING77/CLINC150 experiments;
-- a lexical OOD transformation;
-- parameter and workload matching protocols.
+- this question encoder;
+- these heads internally;
+- this optimizer;
+- this training objective;
+- this sampler implementation.
 
-The second list must never be presented as a description of Jev's hidden architecture.
+Those are repository choices.
 
-## 7. Architectural limitation
+---
 
-Mini-Jev is intentionally small and educational.
+# 16. Correct Architecture Claim
 
-It should therefore be described as:
+Use:
 
 > **“Mini-Jev, an educational decision-native architecture inspired by publicly documented Jev/System One concepts.”**
 
-It should not be described as:
+Do not use:
 
-> “TypeSafe Jev reimplemented from scratch.”
+> “TypeSafe Jev implemented from scratch.”
 
-The repository does not have access to TypeSafe's proprietary weights, internal architecture, training data, sampler implementation or RLCD implementation.
+or:
+
+> “A reproduction of Jev.”
+
+The repository has no access to TypeSafe's proprietary weights, internal architecture, training data, production inference stack or RLCD implementation.
+
+---
+
+# 17. Optional RLCD-Inspired Experiment
+
+The repository contains an optional educational objective described as RLCD-inspired.
+
+Its purpose is to explore the general research idea of optimizing calibrated decisions.
+
+It must be described as:
+
+> **RLCD-inspired educational objective**
+
+and not:
+
+> TypeSafe RLCD
+
+because the actual TypeSafe RLCD algorithm is not publicly specified in sufficient detail for reproduction.

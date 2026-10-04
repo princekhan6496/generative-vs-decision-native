@@ -1,317 +1,543 @@
-# Experiments
+# Experiments and Research Findings
 
-This document defines the experimental protocol used to compare the educational Mini-LLM and Mini-Jev implementations.
+## Abstract
 
-## 1. Research questions
+This study compares a small decoder-only generative language model (**Mini-LLM**) with an educational decision-native model (**Mini-Jev**) for structured AI-automation decisions. Mini-Jev is inspired by publicly documented TypeSafe/System One concepts but is not a reproduction of TypeSafe Jev.
 
-The experiments are intended to study:
+The study evaluates decision accuracy, macro F1, probabilistic quality, seed stability, structured-output reliability, training cost and shared-state multi-question inference. The main BANKING77 experiment uses a parameter-matched protocol with three random seeds: 42, 43 and 44.
 
-1. Whether a small decoder-only generative model can solve fixed structured decision tasks when decisions are represented through text.
-2. Whether a decision-native model is effective when the output space is explicitly typed.
-3. How the two approaches compare in predictive accuracy and macro F1.
-4. How their probability estimates compare using Brier score, ECE and NLL.
-5. How stable the results are across repeated random seeds.
-6. What training and inference costs are measured for these implementations.
-7. Whether evaluating several questions from one shared state provides a measurable latency benefit.
-8. How performance changes under the selected lexical distribution shift.
-9. How the generative model behaves on a separate open-ended language-generation task.
+The measured results show a trade-off. Mini-LLM achieved higher mean intent accuracy (18.67% vs 17.09%) and macro F1 (14.88% vs 12.58%), while Mini-Jev achieved lower mean NLL (2.909 vs 3.435) and substantially lower seed-to-seed accuracy variation (0.70 vs 5.05 percentage points sample SD). Mini-LLM also trained much faster in this implementation. These results do not establish a universal winner; they demonstrate different behavior under the tested architecture and training conditions.
 
-These questions are about the repository's implementations, not about the undisclosed internals of TypeSafe Jev.
+---
 
-## 2. Fairness controls
+# 1. Research Objective
 
-### 2.1 Common examples
+The objective is to experimentally compare two representations of an AI decision:
 
-The underlying records are constructed once and then converted into the same state/question/ground-truth examples for both architectures.
+### Generative representation
 
-Neither architecture receives a different set of examples for the decision benchmark.
+```text
+state → decoder Transformer → generated text
+```
 
-### 2.2 Data split
+### Decision-native representation
 
-A deterministic split is used to create training and validation data from the training distribution. The public test split is kept for held-out evaluation.
+```text
+state + typed question → shared representation → typed probability distribution
+```
 
-The test set is not used for model fitting or temperature-scaling fitting.
+The research question is:
 
-### 2.3 Tokenizer fitting
+> **Under controlled conditions, how do a small generative LLM and a small decision-native architecture differ in decision quality, uncertainty estimation, stability and computational behavior on structured AI-automation tasks?**
 
-The Mini-LLM tokenizer is fitted using training information only.
+The study deliberately avoids treating TypeSafe Jev as an open implementation target because its internal architecture and training procedure are not publicly specified in sufficient detail.
 
-Test information must not influence tokenizer fitting.
+---
 
-### 2.4 Repeated seeds
+# 2. Experimental Hypotheses
 
-The standard repeated-seed protocol uses:
+### H1 — Structured decision quality
+
+A small generative LLM can perform fixed decision tasks by generating textual representations of decisions.
+
+### H2 — Explicit probability modeling
+
+A decision-native model provides probabilities directly through typed heads, whereas the Mini-LLM requires candidate-option likelihoods to construct a comparable probability distribution.
+
+### H3 — Training stability
+
+The architectures may respond differently to random initialization and optimization randomness.
+
+### H4 — Shared-state inference
+
+Reusing a state representation across multiple typed questions may change the latency characteristics of multi-question inference.
+
+### H5 — Task specialization
+
+A decision-native architecture may provide a more explicit interface for fixed decisions, while the generative architecture retains the ability to perform open-ended language generation.
+
+These are experimental hypotheses, not assumptions that the results must confirm.
+
+---
+
+# 3. Common Benchmark
+
+## 3.1 Dataset
+
+The primary decision benchmark is BANKING77.
+
+Each example contains a natural-language banking utterance and its intent category.
+
+## 3.2 Common state
+
+Both models receive the same underlying state.
+
+## 3.3 Typed questions
+
+The state is evaluated through:
+
+- Intent — Choice
+- Routing — Choice
+- Risk — Score
+- Security — Noul
+
+Routing, risk and security targets are derived by explicit benchmark rules. They are not additional human annotations from BANKING77.
+
+---
+
+# 4. Fairness Controls
+
+## 4.1 Same examples
+
+The underlying records are constructed once and converted into common state/question/ground-truth examples.
+
+Both architectures train and evaluate on the same decision examples.
+
+## 4.2 Data separation
+
+Training and validation data are created from the training distribution.
+
+The public test split remains held out.
+
+No test examples are used for model fitting or calibration fitting.
+
+## 4.3 Tokenizer
+
+The Mini-LLM tokenizer is fitted on training information only.
+
+## 4.4 Repeated seeds
+
+The main repeated-seed study uses:
 
 ```text
 42, 43, 44
 ```
 
-Per-seed results should be saved before calculating an aggregate.
+Per-seed results are retained and then aggregated.
 
-For an aggregate report, calculate the mean and standard deviation from the saved per-seed results rather than manually replacing missing runs with estimates.
+## 4.5 Parameter matching
 
-### 2.5 Parameter matching
+The Mini-LLM configuration is fixed.
 
-In `parameter-matched` mode:
+A separate Mini-Jev configuration is searched to minimize parameter-count difference.
 
-- the Mini-LLM configuration is kept fixed;
-- a separate Mini-Jev configuration is searched;
-- the goal is to make parameter counts as close as practical.
-
-This controls approximate model size.
-
-It does **not** make the architectures equivalent in FLOPs, memory access, sequence processing or runtime.
-
-### 2.6 Workload matching
-
-In `compute-matched` mode, the current benchmark controls:
-
-- batch size;
-- optimizer-step count;
-- number of training examples seen.
-
-The benchmark does **not** calculate or equalize exact FLOPs.
-
-Therefore the precise description is:
-
-> **controlled training-workload matching, not exact FLOP matching.**
-
-The benchmark also reports tokens processed and measured training time so that computational differences are visible.
-
-### 2.7 Calibration fitting
-
-Temperature scaling is fitted on validation outputs only:
+The completed parameter-matched experiments used approximately:
 
 ```text
-p = softmax(z / T)
+Mini-LLM = 403,104 parameters
+Mini-Jev = 403,818 parameters
+difference = 714 parameters ≈ 0.18%
 ```
 
-The fitted temperature is then frozen and applied to test outputs.
+This is a close parameter-count match, not an exact compute match.
 
-The test set is never used to choose the temperature.
+## 4.6 Workload matching
 
-Temperature scaling is a calibration baseline and must not be described as TypeSafe RLCD.
+The `compute-matched` protocol matches:
 
-## 3. Decision tasks
+- batch size
+- optimizer-step count
+- number of training examples
 
-The common BANKING77 benchmark uses three typed decision tasks derived from the same state.
+It does not calculate or equalize exact FLOPs.
 
-### Intent
+Actual tokens and measured runtime are reported.
 
-A **Choice** over the dataset's intent labels.
+---
 
-The input state is the BANKING77 utterance, and the target is its original dataset category.
+# 5. Probability Evaluation
 
-### Routing
+## Mini-Jev
 
-A **Choice** over a smaller operational taxonomy:
+Choice and Score heads directly produce probability distributions.
 
-```text
-account
-card
-cash
-payment
-transfer
-other
-```
+Noul produces a binary probability.
 
-The routing target is deterministically derived from the intent/category.
+## Mini-LLM
 
-### Risk
+The Mini-LLM is a generative model and does not possess a native Choice/Score/Noul interface.
 
-A **Score** over:
+For comparable probability metrics, the benchmark:
 
-```text
-low
-medium
-high
-```
-
-The risk target is deterministically derived from explicit intent-name rules defined by the benchmark.
-
-### Security Noul
-
-A **Noul** yes/no decision is also used by the implementation.
-
-Its positive/negative target is derived by explicit benchmark rules rather than supplied as an additional human annotation.
-
-### Important labeling rule
-
-The derived routing, risk and security labels are **benchmark constructions**.
-
-They must not be presented as human-annotated BANKING77 ground truth.
-
-## 4. Mini-Jev inference protocol
-
-The Mini-Jev computes one shared state representation and reuses it for the questions in the same inference call.
-
-Conceptually:
-
-```text
-state
-  ↓
-shared state encoder
-  ↓
-shared representation
-  ├── question 1 → typed head
-  ├── question 2 → typed head
-  ├── question 3 → typed head
-  └── question 4 → typed head
-```
-
-The benchmark records:
-
-- one multi-question / shared-state call;
-- a serial baseline that invokes the model separately for each question.
-
-The serial baseline is useful for measuring the effect of shared-state execution in this implementation.
-
-A measured speedup is **not guaranteed**. Results can depend on batch size, sequence lengths, hardware, implementation overhead and the number of questions.
-
-## 5. Probability evaluation
-
-### Mini-Jev
-
-For Choice and Score tasks, the head directly produces a probability distribution.
-
-For Noul, the model produces a probability through its binary output.
-
-### Mini-LLM
-
-The Mini-LLM does not have a native Choice/Score/Noul interface.
-
-For comparable probability metrics, the benchmark estimates option probabilities using normalized conditional log-likelihoods of candidate options following the decision prompt.
-
-This gives a common categorical probability representation for evaluation.
-
-It must not be described as a native decision head.
-
-### Structured generation
+1. constructs a decision prompt;
+2. lists candidate options;
+3. calculates normalized conditional log-likelihoods for candidate answers;
+4. converts them into a probability distribution.
 
 Generated structured output is evaluated separately.
 
-The benchmark records whether the generated output can be parsed and mapped to the expected decision.
+This separation is important:
 
-A malformed or unmappable generated answer counts as a structured-output failure.
+```text
+probability evaluation ≠ generated-format evaluation
+```
 
-Probability quality and generated-format reliability are therefore separate measurements.
+---
 
-## 6. Metrics
+# 6. Metrics
 
-### Classification quality
+### Decision quality
 
-- **Accuracy:** fraction of correct predictions.
-- **Macro F1:** F1 averaged equally across classes.
-- **Precision:** precision of predicted classes.
-- **Recall:** recall of predicted classes.
-
-Macro F1 is particularly useful when class frequencies are uneven.
+- Accuracy
+- Macro F1
+- Precision
+- Recall
 
 ### Probability quality
 
-- **Brier score:** squared probabilistic error; lower is better.
-- **NLL:** negative log-likelihood of the target; lower is better.
-- **ECE:** expected calibration error; lower generally indicates closer agreement between confidence and empirical accuracy.
+- Brier score
+- ECE
+- NLL
 
-Calibration results should be interpreted together with the underlying accuracy and class distribution.
+### Systems behavior
 
-### Reliability data
+- parameter count
+- training time
+- optimizer steps
+- examples seen
+- tokens processed
+- inference latency
+- throughput
+- structured-output failure rate
 
-Reliability-bin data and confidence histograms are saved so calibration can be inspected instead of relying only on a single scalar.
+### Stability
 
-### Systems measurements
+Mean and sample standard deviation are calculated across the three repeated seeds.
 
-The benchmark records:
+---
 
-- parameter count;
-- measured training time;
-- optimizer steps;
-- examples seen;
-- tokens processed where applicable;
-- latency;
-- throughput;
-- structured-output failure rate.
+# 7. Main Results
 
-Measurements are implementation- and hardware-dependent.
+## 7.1 Intent Accuracy
 
-## 7. Distribution shift
+| Seed | Mini-LLM | Mini-Jev |
+|---|---:|---:|
+| 42 | 23.73% | 17.86% |
+| 43 | 13.64% | 16.92% |
+| 44 | 18.64% | 16.49% |
+| **Mean** | **18.67%** | **17.09%** |
+| **Sample SD** | **5.05 pp** | **0.70 pp** |
 
-The OOD experiment applies a fixed lexical transformation to held-out test states.
+### Observation
 
-The transformation is chosen before evaluation and is not learned from the shifted test set.
+Mini-LLM achieved the higher mean accuracy by:
 
-No tuning or calibration is performed on the shifted test data.
+```text
+18.67% − 17.09% = 1.58 percentage points
+```
 
-The experiment compares performance and calibration degradation between the original and transformed inputs.
+However, Mini-LLM varied substantially across seeds.
 
-This is a controlled lexical-shift experiment, not a claim that it represents all real-world distribution shifts.
+Mini-LLM:
 
-## 8. Language generation
+```text
+23.73%
+13.64%
+18.64%
+```
 
-TinyStories is evaluated separately as a next-token language-modeling task.
+Mini-Jev:
 
-Its metrics measure language-generation behavior, not decision quality.
+```text
+17.86%
+16.92%
+16.49%
+```
+
+The Mini-Jev standard deviation was much smaller.
+
+### Research interpretation
+
+The result indicates:
+
+> **Mini-LLM had higher average intent accuracy, but Mini-Jev showed much greater seed stability in this experiment.**
+
+This is one of the main findings of the study.
+
+It should not be generalized beyond the tested models and three seeds.
+
+---
+
+# 8. Macro F1
+
+| Metric | Mini-LLM | Mini-Jev |
+|---|---:|---:|
+| Mean | **14.88%** | 12.58% |
+| Sample SD | 4.34 pp | 0.34 pp |
+
+Mini-LLM again had higher mean performance.
+
+Mini-Jev again showed lower variation across seeds.
+
+This supports the same qualitative observation seen with intent accuracy:
+
+> **The Mini-LLM reached a higher average score, while Mini-Jev was more consistent.**
+
+---
+
+# 9. Probability Quality
+
+| Metric | Mini-LLM | Mini-Jev |
+|---|---:|---:|
+| Mean Brier | **0.915** | 0.925 |
+| Mean NLL | 3.435 | **2.909** |
+
+Lower is better for both metrics.
+
+The results are therefore mixed:
+
+- Brier favors Mini-LLM slightly.
+- NLL favors Mini-Jev substantially.
+
+This means the probability comparison cannot be reduced to one universal winner.
+
+It demonstrates why structured-decision evaluation should include both task accuracy and uncertainty metrics.
+
+---
+
+# 10. Noul Results
+
+| Seed | Mini-LLM | Mini-Jev |
+|---|---:|---:|
+| 42 | 95.42% | 93.18% |
+| 43 | 95.29% | 93.41% |
+| 44 | 94.74% | 92.56% |
+| **Mean** | **95.15%** | 93.05% |
+
+The Noul task is binary and therefore easier to solve than 77-class intent prediction.
+
+Because its class distribution is imbalanced, accuracy alone should not be used as the only measure of binary decision quality.
+
+---
+
+# 11. Training Cost
+
+| Seed | Mini-LLM | Mini-Jev |
+|---|---:|---:|
+| 42 | 125.04 s | 1778.72 s |
+| 43 | 123.48 s | 1637.59 s |
+| 44 | 125.97 s | 1585.06 s |
+| **Mean** | **124.83 s** | **1667.12 s** |
+
+Mini-Jev required substantially more measured training time in this implementation.
+
+This observation must be worded carefully:
+
+> **“Mini-Jev was substantially slower to train in this implementation and protocol.”**
+
+It must not be written as:
+
+> “Jev is slower than an LLM.”
+
+The experiment does not measure TypeSafe's production system.
+
+---
+
+# 12. Structured Output Reliability
+
+The completed parameter-matched runs produced essentially zero structured-output failures.
+
+Therefore, in these experiments, the Mini-LLM's low intent accuracy cannot simply be explained by malformed generated output.
+
+The model generally produced outputs that could be parsed/mapped, even though the predicted intent was often incorrect.
+
+This is useful because it separates:
+
+```text
+format failure
+```
+
+from:
+
+```text
+decision error
+```
+
+---
+
+# 13. Seed Stability as a Research Finding
+
+This deserves separate treatment because it is one of the clearest differences in the experiment.
+
+Mini-LLM intent accuracy range:
+
+```text
+23.73 − 13.64 = 10.09 percentage points
+```
+
+Mini-Jev intent accuracy range:
+
+```text
+17.86 − 16.49 = 1.37 percentage points
+```
 
 Therefore:
 
-- TinyStories loss must not be averaged with decision-task Brier/F1/accuracy.
-- TinyStories generation results must not be used to claim superiority on structured automation tasks.
-- Decision-task results must not be used to claim general language-model superiority.
+> **The Mini-Jev results were much less sensitive to the three tested random seeds, while Mini-LLM results changed considerably between runs.**
 
-## 9. Reporting repeated seeds
+Possible explanations include differences in optimization dynamics and the difficulty of learning a multi-task structured-output behavior through a small generative model.
 
-For each metric:
+However, this study does not isolate the causal mechanism. More seeds and controlled ablations would be required to establish why the difference occurs.
+
+---
+
+# 14. The Low Absolute Accuracy: Interpretation and Limitation
+
+The intent accuracy of both models is low.
+
+This is an important limitation and should be reported openly.
+
+The study is not intended to be a state-of-the-art BANKING77 classification benchmark.
+
+The models are educational-scale implementations, and the study focuses on architectural behavior under a controlled parameter budget.
+
+Therefore the correct claim is:
+
+> **The experiment compares the relative behavior of two small architectures; it does not demonstrate competitive absolute BANKING77 classification performance.**
+
+A stronger classifier could require:
+
+- larger model capacity
+- longer training
+- hyperparameter tuning
+- task-specific optimization
+- more extensive training experiments
+
+Those improvements would answer a different question.
+
+The low accuracy should therefore be treated as a limitation, not hidden as a positive result.
+
+---
+
+# 15. Research Findings
+
+### Finding 1 — Similar low absolute accuracy
+
+Both architectures had low absolute intent accuracy in the current educational setup.
+
+### Finding 2 — Mini-LLM had a slightly higher mean
+
+Mini-LLM:
 
 ```text
-mean = average of the saved per-seed values
-standard deviation = sample standard deviation across seeds
+18.67%
 ```
 
-Report the individual seed values as well as the aggregate where practical.
+Mini-Jev:
 
-Do not report an aggregate if required seed runs are missing without clearly labeling it as incomplete.
+```text
+17.09%
+```
 
-## 10. What the experiments cannot establish
+### Finding 3 — Mini-Jev was substantially more stable
 
-These experiments cannot establish:
+Mini-Jev had:
 
-- the internal architecture of TypeSafe Jev;
-- that Mini-Jev is equivalent to Jev;
-- that TypeSafe uses the same Transformer components implemented here;
-- that the measured training-time ratio would hold for TypeSafe's production system;
-- that the measured latency represents TypeSafe's service;
-- that the educational RLCD-inspired objective reproduces RLCD;
-- that the benchmark's derived routing/risk labels represent human judgments;
-- that one architecture is universally better for all AI automation workloads.
+```text
+0.70 pp sample SD
+```
 
-## 11. What is not measured automatically
+versus:
 
-A complete repeated-seed benchmark requires:
+```text
+5.05 pp sample SD
+```
 
-- the required datasets to be present locally;
-- the requested experiments to actually be run;
-- sufficient compute and time for all seeds.
+for Mini-LLM.
 
-Until an experiment has been executed, its result should be described as:
+### Finding 4 — Probability metrics disagreed
 
-> **unmeasured**
+Mini-LLM had slightly better Brier score.
 
-It must not be described as zero, estimated, expected, or completed.
+Mini-Jev had better NLL.
 
-## 12. Recommended interpretation
+### Finding 5 — Training cost differed strongly
 
-The strongest conclusions should be narrow and evidence-based.
+Mini-Jev took substantially longer to train in the current implementation despite nearly equal parameter counts.
 
-For example:
+### Finding 6 — Structured output was not the primary failure mode
 
-> “Under this parameter-matched protocol, Mini-LLM and Mini-Jev showed different trade-offs in task accuracy, probabilistic quality, stability and measured runtime.”
+Mini-LLM structured-output failures were essentially zero in the final parameter-matched runs.
 
-Avoid:
+### Finding 7 — Parameter count alone does not explain behavior
 
-> “Mini-Jev is better than LLMs.”
+The models had almost identical parameter counts but showed different accuracy stability, probability behavior and training time.
 
-or:
+---
 
-> “This proves Jev is faster.”
+# 16. Overall Conclusion
 
-The experiments compare two educational implementations under a specified protocol. They do not benchmark TypeSafe's proprietary production model.
+The experiments do not support a universal “generative LLM vs decision-native model” winner.
+
+Instead, they show a measurable trade-off:
+
+```text
+Mini-LLM
+↑ slightly higher mean accuracy/F1
+↑ slightly better mean Brier
+↑ much lower measured training time
+↓ much larger seed-to-seed variation
+↓ probability behavior represented indirectly for decision evaluation
+
+Mini-Jev
+↑ much more stable accuracy across tested seeds
+↑ better mean NLL
+↑ native typed decision representation
+↓ lower mean intent accuracy in this experiment
+↓ substantially higher measured training cost
+```
+
+The central conclusion is:
+
+> **For the tested small models, representing a decision as generated text and representing it as an explicit typed decision are not equivalent engineering choices. They produce different trade-offs in accuracy, uncertainty estimation, stability and computational cost.**
+
+The study therefore supports **workload-dependent architecture selection**, not a universal claim that one paradigm replaces the other.
+
+---
+
+# 17. Limitations
+
+1. Only three seeds were used.
+2. Both models are small educational implementations.
+3. Absolute BANKING77 accuracy is low.
+4. Parameter matching does not imply exact FLOP matching.
+5. `compute-matched` is workload matching, not exact compute matching.
+6. Training time depends on implementation and hardware.
+7. Derived routing/risk/security labels are not human annotations.
+8. Mini-Jev does not reproduce TypeSafe's proprietary architecture.
+9. The RLCD-inspired objective is not TypeSafe RLCD.
+10. The experiment cannot establish how TypeSafe Jev itself would perform under this benchmark.
+
+---
+
+# 18. Further Experiments
+
+A stronger research extension would include:
+
+- more random seeds;
+- larger model sizes;
+- training curves;
+- ablation of the Mini-Jev shared encoder;
+- ablation of typed heads;
+- more decision datasets;
+- exact FLOP accounting;
+- controlled inference batch-size experiments;
+- stronger OOD transformations;
+- additional calibration methods;
+- larger language-generation evaluation.
+
+These are future experiments, not current results.
+
+---
+
+# 19. Reproducibility Rule
+
+Every reported number must come from an executed experiment.
+
+If an experiment has not been run:
+
+```text
+status = unmeasured
+```
+
+It must not be represented as an expected, estimated or fabricated result.
