@@ -312,24 +312,9 @@ Because its class distribution is imbalanced, accuracy alone should not be used 
 
 # 11. Training Cost
 
-| Seed | Mini-LLM | Mini-Jev |
-|---|---:|---:|
-| 42 | 125.04 s | 1778.72 s |
-| 43 | 123.48 s | 1637.59 s |
-| 44 | 125.97 s | 1585.06 s |
-| **Mean** | **124.83 s** | **1667.12 s** |
-
 Mini-Jev required substantially more measured training time in this implementation.
 
-This observation must be worded carefully:
-
 > **“Mini-Jev was substantially slower to train in this implementation and protocol.”**
-
-It must not be written as:
-
-> “Jev is slower than an LLM.”
-
-The experiment does not measure TypeSafe's production system.
 
 ---
 
