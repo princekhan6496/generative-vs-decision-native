@@ -254,16 +254,9 @@ The positive class was also relatively uncommon, so accuracy alone is not suffic
 
 ## 6.5 Training cost
 
-| Seed | Mini-LLM | Mini-Jev |
-|---|---:|---:|
-| 42 | 125.04 s | 1778.72 s |
-| 43 | 123.48 s | 1637.59 s |
-| 44 | 125.97 s | 1585.06 s |
-| **Mean** | **124.83 s** | **1667.12 s** |
-
 In this implementation and training procedure, Mini-Jev took substantially longer to train.
 
-This is a **measurement of this implementation**, not evidence that TypeSafe Jev itself is slower than an LLM.
+This is a **measurement of this implementation**.
 
 The protocols also do not provide exact FLOP matching.
 
